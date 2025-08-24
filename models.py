@@ -89,20 +89,53 @@ class ChatChunk(TypedDict):
 rate_limiters: dict[str, RateLimiter] = {}
 api_keys_round_robin: dict[str, int] = {}
 
-def get_api_key(service: str) -> str:
-    # get api key for the service
-    key = (
+# New global state for intelligent API key management
+api_key_states: dict[str, dict] = {} # Stores {key_value: {"restricted_until": datetime_object, "service": "openai"}}
+api_keys_last_used_index: dict[str, int] = {} # Tracks last used index for round-robin among available keys
+
+from datetime import datetime, timedelta
+
+def mark_key_as_restricted(api_key: str, service: str, duration_seconds: int = 60):
+    """Marks an API key as restricted for a given duration."""
+    restricted_until = datetime.now() + timedelta(seconds=duration_seconds)
+    api_key_states[api_key] = {"restricted_until": restricted_until, "service": service}
+    logging.warning(f"API key {api_key[:5]}... for service {service} marked as restricted until {restricted_until}.")
+
+def all_keys_for_service(service: str) -> List[str]:
+    key_str = (
         dotenv.get_dotenv_value(f"API_KEY_{service.upper()}")
         or dotenv.get_dotenv_value(f"{service.upper()}_API_KEY")
         or dotenv.get_dotenv_value(f"{service.upper()}_API_TOKEN")
-        or "None"
+        or ""
     )
-    # if the key contains a comma, use round-robin
-    if "," in key:
-        api_keys = [k.strip() for k in key.split(",") if k.strip()]
-        api_keys_round_robin[service] = api_keys_round_robin.get(service, -1) + 1
-        key = api_keys[api_keys_round_robin[service] % len(api_keys)]
-    return key
+    return [k.strip() for k in key_str.split(",") if k.strip()] if key_str else []
+
+def get_api_key(service: str) -> Optional[str]:
+    """Gets an API key for the service, preferring unrestricted keys and using round-robin."""
+    all_keys = all_keys_for_service(service)
+    if not all_keys:
+        return None # No keys configured
+
+    available_keys = []
+    now = datetime.now()
+    for k in all_keys:
+        state = api_key_states.get(k)
+        if not state or state["restricted_until"] <= now:
+            available_keys.append(k)
+        else:
+            logging.info(f"Skipping restricted key {k[:5]}... for {service}. Restricted until {state['restricted_until']}.")
+
+    if not available_keys:
+        logging.warning(f"All API keys for service {service} are currently restricted.")
+        return None # All keys are restricted
+
+    # Use round-robin among available keys
+    last_index = api_keys_last_used_index.get(service, -1)
+    next_index = (last_index + 1) % len(available_keys)
+    selected_key = available_keys[next_index]
+    api_keys_last_used_index[service] = next_index
+
+    return selected_key
 
 
 def get_rate_limiter(
@@ -214,20 +247,50 @@ class LiteLLMChatWrapper(SimpleChatModel):
         **kwargs: Any,
     ) -> str:
         import asyncio
+        from litellm.exceptions import RateLimitError
         
         msgs = self._convert_messages(messages)
         
         # Apply rate limiting if configured
         apply_rate_limiter_sync(self.a0_model_conf, str(msgs))
         
-        # Call the model
-        resp = completion(
-            model=self.model_name, messages=msgs, stop=stop, **{**self.kwargs, **kwargs}
-        )
-
-        # Parse output
-        parsed = _parse_chunk(resp)
-        return parsed["response_delta"]
+        max_retries = 3 # Define max retries
+        retries = 0
+        while retries < max_retries:
+            try:
+                # Call the model
+                resp = completion(
+                    model=self.model_name, messages=msgs, stop=stop, **{**self.kwargs, **kwargs}
+                )
+                # If successful, break the retry loop
+                parsed = _parse_chunk(resp)
+                return parsed["response_delta"]
+            except RateLimitError as e:
+                logging.warning(f"Rate limit hit for {self.model_name}. Retrying with a different key if available. Error: {e}")
+                # Mark current key as restricted
+                current_api_key = kwargs.get("api_key") or self.kwargs.get("api_key")
+                if current_api_key:
+                    mark_key_as_restricted(current_api_key, self.provider)
+                
+                # Attempt to get a new key and update kwargs for retry
+                new_api_key = get_api_key(self.provider)
+                if new_api_key:
+                    kwargs["api_key"] = new_api_key
+                    self.kwargs["api_key"] = new_api_key # Update instance kwargs as well
+                    retries += 1
+                    logging.info(f"Retrying with new API key (attempt {retries}/{max_retries}).")
+                    # Optional: Add a small delay before retrying
+                    import time
+                    time.sleep(1 * retries)
+                else:
+                    logging.error(f"No available API keys for {self.provider} after rate limit. Aborting.")
+                    raise e # Re-raise if no new key is available
+            except Exception as e:
+                logging.error(f"An unexpected error occurred during LLM call: {e}")
+                raise e
+        
+        # If all retries fail
+        raise RateLimitError(f"Failed to complete request for {self.model_name} after {max_retries} retries due to rate limits.")
 
     def _stream(
         self,
@@ -237,25 +300,57 @@ class LiteLLMChatWrapper(SimpleChatModel):
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         import asyncio
+        from litellm.exceptions import RateLimitError
         
         msgs = self._convert_messages(messages)
         
         # Apply rate limiting if configured
         apply_rate_limiter_sync(self.a0_model_conf, str(msgs))
         
-        for chunk in completion(
-            model=self.model_name,
-            messages=msgs,
-            stream=True,
-            stop=stop,
-            **{**self.kwargs, **kwargs},
-        ):
-            parsed = _parse_chunk(chunk)
-            # Only yield chunks with non-None content
-            if parsed["response_delta"]:
-                yield ChatGenerationChunk(
-                    message=AIMessageChunk(content=parsed["response_delta"])
-                )
+        max_retries = 3 # Define max retries
+        retries = 0
+        while retries < max_retries:
+            try:
+                for chunk in completion(
+                    model=self.model_name,
+                    messages=msgs,
+                    stream=True,
+                    stop=stop,
+                    **{**self.kwargs, **kwargs},
+                ):
+                    parsed = _parse_chunk(chunk)
+                    # Only yield chunks with non-None content
+                    if parsed["response_delta"]:
+                        yield ChatGenerationChunk(
+                            message=AIMessageChunk(content=parsed["response_delta"])
+                        )
+                return # If successful, exit the retry loop
+            except RateLimitError as e:
+                logging.warning(f"Rate limit hit for {self.model_name} during streaming. Retrying with a different key if available. Error: {e}")
+                # Mark current key as restricted
+                current_api_key = kwargs.get("api_key") or self.kwargs.get("api_key")
+                if current_api_key:
+                    mark_key_as_restricted(current_api_key, self.provider)
+                
+                # Attempt to get a new key and update kwargs for retry
+                new_api_key = get_api_key(self.provider)
+                if new_api_key:
+                    kwargs["api_key"] = new_api_key
+                    self.kwargs["api_key"] = new_api_key # Update instance kwargs as well
+                    retries += 1
+                    logging.info(f"Retrying stream with new API key (attempt {retries}/{max_retries}).")
+                    # Optional: Add a small delay before retrying
+                    import time
+                    time.sleep(1 * retries)
+                else:
+                    logging.error(f"No available API keys for {self.provider} after rate limit during streaming. Aborting.")
+                    raise e # Re-raise if no new key is available
+            except Exception as e:
+                logging.error(f"An unexpected error occurred during LLM streaming call: {e}")
+                raise e
+        
+        # If all retries fail
+        raise RateLimitError(f"Failed to complete streaming request for {self.model_name} after {max_retries} retries due to rate limits.")
 
     async def _astream(
         self,
@@ -264,26 +359,58 @@ class LiteLLMChatWrapper(SimpleChatModel):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
+        import asyncio
+        from litellm.exceptions import RateLimitError
+        
         msgs = self._convert_messages(messages)
         
         # Apply rate limiting if configured
         await apply_rate_limiter(self.a0_model_conf, str(msgs))
         
-        
-        response = await acompletion(
-            model=self.model_name,
-            messages=msgs,
-            stream=True,
-            stop=stop,
-            **{**self.kwargs, **kwargs},
-        )
-        async for chunk in response:  # type: ignore
-            parsed = _parse_chunk(chunk)
-            # Only yield chunks with non-None content
-            if parsed["response_delta"]:
-                yield ChatGenerationChunk(
-                    message=AIMessageChunk(content=parsed["response_delta"])
+        max_retries = 3 # Define max retries
+        retries = 0
+        while retries < max_retries:
+            try:
+                response = await acompletion(
+                    model=self.model_name,
+                    messages=msgs,
+                    stream=True,
+                    stop=stop,
+                    **{**self.kwargs, **kwargs},
                 )
+                async for chunk in response:  # type: ignore
+                    parsed = _parse_chunk(chunk)
+                    # Only yield chunks with non-None content
+                    if parsed["response_delta"]:
+                        yield ChatGenerationChunk(
+                            message=AIMessageChunk(content=parsed["response_delta"])
+                        )
+                return # If successful, exit the retry loop
+            except RateLimitError as e:
+                logging.warning(f"Rate limit hit for {self.model_name} during async streaming. Retrying with a different key if available. Error: {e}")
+                # Mark current key as restricted
+                current_api_key = kwargs.get("api_key") or self.kwargs.get("api_key")
+                if current_api_key:
+                    mark_key_as_restricted(current_api_key, self.provider)
+                
+                # Attempt to get a new key and update kwargs for retry
+                new_api_key = get_api_key(self.provider)
+                if new_api_key:
+                    kwargs["api_key"] = new_api_key
+                    self.kwargs["api_key"] = new_api_key # Update instance kwargs as well
+                    retries += 1
+                    logging.info(f"Retrying async stream with new API key (attempt {retries}/{max_retries}).")
+                    # Optional: Add a small delay before retrying
+                    await asyncio.sleep(1 * retries)
+                else:
+                    logging.error(f"No available API keys for {self.provider} after rate limit during async streaming. Aborting.")
+                    raise e # Re-raise if no new key is available
+            except Exception as e:
+                logging.error(f"An unexpected error occurred during LLM async streaming call: {e}")
+                raise e
+        
+        # If all retries fail
+        raise RateLimitError(f"Failed to complete async streaming request for {self.model_name} after {max_retries} retries due to rate limits.")
 
     async def unified_call(
         self,
@@ -314,12 +441,43 @@ class LiteLLMChatWrapper(SimpleChatModel):
         limiter = await apply_rate_limiter(self.a0_model_conf, str(msgs_conv), rate_limiter_callback)
 
         # call model
-        _completion = await acompletion(
-            model=self.model_name,
-            messages=msgs_conv,
-            stream=True,
-            **{**self.kwargs, **kwargs},
-        )
+        max_retries = 3 # Define max retries
+        retries = 0
+        while retries < max_retries:
+            try:
+                _completion = await acompletion(
+                    model=self.model_name,
+                    messages=msgs_conv,
+                    stream=True,
+                    **{**self.kwargs, **kwargs},
+                )
+                break # If successful, break the retry loop
+            except RateLimitError as e:
+                logging.warning(f"Rate limit hit for {self.model_name} during unified call. Retrying with a different key if available. Error: {e}")
+                # Mark current key as restricted
+                current_api_key = kwargs.get("api_key") or self.kwargs.get("api_key")
+                if current_api_key:
+                    mark_key_as_restricted(current_api_key, self.provider)
+                
+                # Attempt to get a new key and update kwargs for retry
+                new_api_key = get_api_key(self.provider)
+                if new_api_key:
+                    kwargs["api_key"] = new_api_key
+                    self.kwargs["api_key"] = new_api_key # Update instance kwargs as well
+                    retries += 1
+                    logging.info(f"Retrying unified call with new API key (attempt {retries}/{max_retries}).")
+                    # Optional: Add a small delay before retrying
+                    await asyncio.sleep(1 * retries)
+                else:
+                    logging.error(f"No available API keys for {self.provider} after rate limit during unified call. Aborting.")
+                    raise e # Re-raise if no new key is available
+            except Exception as e:
+                logging.error(f"An unexpected error occurred during LLM unified call: {e}")
+                raise e
+        
+        # If all retries fail before getting a completion object
+        if '_completion' not in locals():
+            raise RateLimitError(f"Failed to get a completion object for {self.model_name} after {max_retries} retries due to rate limits.")
 
         # results
         reasoning = ""
@@ -405,22 +563,84 @@ class LiteLLMEmbeddingWrapper(Embeddings):
         self.a0_model_conf = model_config
     
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        from litellm.exceptions import RateLimitError
+        import time
+
         # Apply rate limiting if configured
         apply_rate_limiter_sync(self.a0_model_conf, " ".join(texts))
         
-        resp = embedding(model=self.model_name, input=texts, **self.kwargs)
-        return [
-            item.get("embedding") if isinstance(item, dict) else item.embedding  # type: ignore
-            for item in resp.data  # type: ignore
-        ]
+        max_retries = 3 # Define max retries
+        retries = 0
+        while retries < max_retries:
+            try:
+                resp = embedding(model=self.model_name, input=texts, **self.kwargs)
+                return [
+                    item.get("embedding") if isinstance(item, dict) else item.embedding  # type: ignore
+                    for item in resp.data  # type: ignore
+                ]
+            except RateLimitError as e:
+                logging.warning(f"Rate limit hit for {self.model_name} during embedding documents. Retrying with a different key if available. Error: {e}")
+                # Mark current key as restricted
+                current_api_key = self.kwargs.get("api_key")
+                if current_api_key:
+                    mark_key_as_restricted(current_api_key, self.provider)
+                
+                # Attempt to get a new key and update kwargs for retry
+                new_api_key = get_api_key(self.provider)
+                if new_api_key:
+                    self.kwargs["api_key"] = new_api_key # Update instance kwargs
+                    retries += 1
+                    logging.info(f"Retrying embedding documents with new API key (attempt {retries}/{max_retries}).")
+                    # Optional: Add a small delay before retrying
+                    time.sleep(1 * retries)
+                else:
+                    logging.error(f"No available API keys for {self.provider} after rate limit during embedding documents. Aborting.")
+                    raise e # Re-raise if no new key is available
+            except Exception as e:
+                logging.error(f"An unexpected error occurred during LLM embedding documents call: {e}")
+                raise e
+        
+        # If all retries fail
+        raise RateLimitError(f"Failed to embed documents for {self.model_name} after {max_retries} retries due to rate limits.")
 
     def embed_query(self, text: str) -> List[float]:
+        from litellm.exceptions import RateLimitError
+        import time
+
         # Apply rate limiting if configured
         apply_rate_limiter_sync(self.a0_model_conf, text)
         
-        resp = embedding(model=self.model_name, input=[text], **self.kwargs)
-        item = resp.data[0]  # type: ignore
-        return item.get("embedding") if isinstance(item, dict) else item.embedding  # type: ignore
+        max_retries = 3 # Define max retries
+        retries = 0
+        while retries < max_retries:
+            try:
+                resp = embedding(model=self.model_name, input=[text], **self.kwargs)
+                item = resp.data[0]  # type: ignore
+                return item.get("embedding") if isinstance(item, dict) else item.embedding  # type: ignore
+            except RateLimitError as e:
+                logging.warning(f"Rate limit hit for {self.model_name} during embedding query. Retrying with a different key if available. Error: {e}")
+                # Mark current key as restricted
+                current_api_key = self.kwargs.get("api_key")
+                if current_api_key:
+                    mark_key_as_restricted(current_api_key, self.provider)
+                
+                # Attempt to get a new key and update kwargs for retry
+                new_api_key = get_api_key(self.provider)
+                if new_api_key:
+                    self.kwargs["api_key"] = new_api_key # Update instance kwargs
+                    retries += 1
+                    logging.info(f"Retrying embedding query with new API key (attempt {retries}/{max_retries}).")
+                    # Optional: Add a small delay before retrying
+                    time.sleep(1 * retries)
+                else:
+                    logging.error(f"No available API keys for {self.provider} after rate limit during embedding query. Aborting.")
+                    raise e # Re-raise if no new key is available
+            except Exception as e:
+                logging.error(f"An unexpected error occurred during LLM embedding query call: {e}")
+                raise e
+        
+        # If all retries fail
+        raise RateLimitError(f"Failed to embed query for {self.model_name} after {max_retries} retries due to rate limits.")
 
 
 class LocalSentenceTransformerWrapper(Embeddings):
@@ -463,10 +683,12 @@ def _get_litellm_chat(
     model_config: Optional[ModelConfig] = None,
     **kwargs: Any,
 ):
-    # use api key from kwargs or env
-    api_key = kwargs.pop("api_key", None) or get_api_key(provider_name)
+    # Use api key from kwargs if provided, otherwise get from env/smart selection
+    api_key = kwargs.pop("api_key", None)
+    if not api_key:
+        api_key = get_api_key(provider_name)
 
-    # Only pass API key if key is not a placeholder
+    # Only pass API key if key is not None or a placeholder
     if api_key and api_key not in ("None", "NA"):
         kwargs["api_key"] = api_key
 
@@ -489,10 +711,12 @@ def _get_litellm_embedding(model_name: str, provider_name: str, model_config: Op
             provider=provider_name, model=model_name, model_config=model_config, **kwargs
         )
 
-    # use api key from kwargs or env
-    api_key = kwargs.pop("api_key", None) or get_api_key(provider_name)
+    # Use api key from kwargs if provided, otherwise get from env/smart selection
+    api_key = kwargs.pop("api_key", None)
+    if not api_key:
+        api_key = get_api_key(provider_name)
 
-    # Only pass API key if key is not a placeholder
+    # Only pass API key if key is not None or a placeholder
     if api_key and api_key not in ("None", "NA"):
         kwargs["api_key"] = api_key
 
