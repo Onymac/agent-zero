@@ -602,6 +602,97 @@ globalThis.newChat = async function () {
   }
 };
 
+globalThis.renameChat = async function (id) {
+  if (!id) {
+    console.error("No chat ID provided for renaming");
+    return;
+  }
+
+  const chatsAD = Alpine.$data(chatsSection);
+  const chat = chatsAD.contexts.find(ctx => ctx.id === id);
+
+  if (!chat) {
+    console.error("Chat not found for renaming");
+    return;
+  }
+
+  const currentName = chat.name || `Chat #${chat.no}`;
+  // Use the new modal instead of prompt
+  if (window.Alpine && window.Alpine.store('renameModal')) {
+    window.Alpine.store('renameModal').open(id, currentName);
+    return;
+  }
+
+  // Fallback to prompt if modal is not available
+  const newName = prompt("Enter new chat name:", currentName);
+
+  if (newName === null || newName.trim() === "") {
+    return; // User cancelled or entered empty name
+  }
+
+  try {
+    // Update the chat name on the server
+    await sendJsonData("/chat_rename", {
+      context: id,
+      name: newName.trim()
+    });
+
+    // Update the UI
+    const updatedContexts = chatsAD.contexts.map(ctx =>
+      ctx.id === id ? { ...ctx, name: newName.trim() } : ctx
+    );
+    chatsAD.contexts = [...updatedContexts];
+
+    toast("Chat renamed successfully", "success", 3000);
+  } catch (e) {
+    console.error("Error renaming chat:", e);
+    globalThis.toastFetchError("Error renaming chat", e);
+  }
+};
+
+// Function specifically for the modal to call
+globalThis.renameChatWithModal = async function (id, newName) {
+  const chatsAD = Alpine.$data(chatsSection);
+  const tasksSection = document.getElementById('tasks-section');
+  const tasksAD = tasksSection ? Alpine.$data(tasksSection) : null;
+
+  try {
+    // Update the chat name on the server
+    await sendJsonData("/chat_rename", {
+      context: id,
+      name: newName
+    });
+
+    // Update the chat UI if the item exists in chats
+    if (chatsAD && chatsAD.contexts) {
+      const chatExists = chatsAD.contexts.find(ctx => ctx.id === id);
+      if (chatExists) {
+        const updatedContexts = chatsAD.contexts.map(ctx =>
+          ctx.id === id ? { ...ctx, name: newName } : ctx
+        );
+        chatsAD.contexts = [...updatedContexts];
+      }
+    }
+
+    // Update the task UI if the item exists in tasks
+    if (tasksAD && tasksAD.tasks) {
+      const taskExists = tasksAD.tasks.find(task => task.id === id);
+      if (taskExists) {
+        const updatedTasks = tasksAD.tasks.map(task =>
+          task.id === id ? { ...task, name: newName, task_name: newName } : task
+        );
+        tasksAD.tasks = [...updatedTasks];
+      }
+    }
+
+    toast("Renamed successfully", "success", 3000);
+  } catch (e) {
+    console.error("Error renaming:", e);
+    globalThis.toastFetchError("Error renaming", e);
+    throw e; // Re-throw to let the modal handle the error
+  }
+};
+
 globalThis.killChat = async function (id) {
   if (!id) {
     console.error("No chat ID provided for deletion");
@@ -1208,7 +1299,22 @@ function initializeActiveTab() {
   }
 
   const activeTab = localStorage.getItem("activeTab") || "chats";
-  activateTab(activeTab);
+  
+  // Wait for Alpine.js to be ready before activating tab
+  if (globalThis.Alpine) {
+    // Alpine is ready, activate tab immediately
+    activateTab(activeTab);
+  } else {
+    // Wait for Alpine to be available
+    const checkAlpine = () => {
+      if (globalThis.Alpine) {
+        activateTab(activeTab);
+      } else {
+        setTimeout(checkAlpine, 50);
+      }
+    };
+    checkAlpine();
+  }
 }
 
 /*

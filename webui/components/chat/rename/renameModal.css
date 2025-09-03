@@ -1,0 +1,218 @@
+/* Rename Modal Styles */
+.rename-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1050;
+    padding: 1rem;
+}
+
+.light-mode .rename-modal-backdrop {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.rename-modal-content {
+    background-color: var(--color-panel);
+    border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    width: 100%;
+    max-width: 400px;
+    max-height: 90vh;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+}
+
+.light-mode .rename-modal-content {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+}
+
+/* Header */
+.rename-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5rem 1.5rem 1rem 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.rename-modal-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.rename-modal-close {
+    background: none;
+    border: none;
+    color: var(--color-text);
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    opacity: 0.7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rename-modal-close:hover {
+    opacity: 1;
+    background-color: var(--color-border);
+}
+
+.rename-modal-close:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Body */
+.rename-modal-body {
+    padding: 1.5rem;
+}
+
+.rename-input-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text);
+    margin-bottom: 0.5rem;
+}
+
+.rename-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background-color: var(--color-input);
+    color: var(--color-text);
+    font-size: 1rem;
+    transition: all 0.2s ease;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.rename-input:focus {
+    border-color: #4248f1;
+    box-shadow: 0 0 0 3px rgba(66, 72, 241, 0.1);
+    background-color: var(--color-input-focus);
+}
+
+.rename-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.rename-input::placeholder {
+    color: var(--color-secondary);
+    opacity: 0.7;
+}
+
+/* Footer */
+.rename-modal-footer {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem 1.5rem 1.5rem;
+    border-top: 1px solid var(--color-border);
+    justify-content: flex-end;
+}
+
+.rename-btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-width: 80px;
+}
+
+.rename-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.rename-btn-secondary {
+    background-color: transparent;
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+}
+
+.rename-btn-secondary:hover:not(:disabled) {
+    background-color: var(--color-border);
+}
+
+.rename-btn-primary {
+    background-color: #4248f1;
+    color: white;
+    border: 1px solid #4248f1;
+}
+
+.rename-btn-primary:hover:not(:disabled) {
+    background-color: #353bc5;
+    border-color: #353bc5;
+}
+
+.rename-btn-primary:active:not(:disabled) {
+    background-color: #2b309c;
+    border-color: #2b309c;
+}
+
+/* Loading spinner */
+.loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.loading-spinner svg {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Responsive design */
+@media (max-width: 480px) {
+    .rename-modal-content {
+        margin: 1rem;
+        max-width: calc(100vw - 2rem);
+    }
+    
+    .rename-modal-header,
+    .rename-modal-body,
+    .rename-modal-footer {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    
+    .rename-modal-footer {
+        flex-direction: column;
+    }
+    
+    .rename-btn {
+        width: 100%;
+    }
+}
+
+/* Alpine cloak */
+[x-cloak] {
+    display: none !important;
+}
