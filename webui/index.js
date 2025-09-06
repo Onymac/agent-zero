@@ -602,6 +602,48 @@ globalThis.newChat = async function () {
   }
 };
 
+globalThis.togglePin = async function (contextId, pinned) {
+  if (!contextId) {
+    console.error("No context ID provided for pin toggle");
+    return;
+  }
+
+  try {
+    const response = await fetchApi('/chat_pin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        context: contextId,
+        pinned: pinned
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log('Pin status updated:', result);
+      
+      // Update the local context data
+      const chatsAD = Alpine.$data(chatsSection);
+      const chatIndex = chatsAD.contexts.findIndex(ctx => ctx.id === contextId);
+      if (chatIndex !== -1) {
+        chatsAD.contexts[chatIndex].pinned = pinned;
+      }
+      
+      // Show success message
+      showToast(pinned ? 'Chat pinned' : 'Chat unpinned', 'success');
+    } else {
+      const errorText = await response.text();
+      console.error('Failed to toggle pin:', errorText);
+      showToast('Failed to toggle pin status', 'error');
+    }
+  } catch (e) {
+    console.error('Error toggling pin:', e);
+    showToast('Error toggling pin status', 'error');
+  }
+};
+
 globalThis.renameChat = async function (id) {
   if (!id) {
     console.error("No chat ID provided for renaming");

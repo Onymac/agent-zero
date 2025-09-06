@@ -69,6 +69,10 @@
   --transition-speed: 0.3s;
   --svg-filter: brightness(0) saturate(100%) var(--color-primary-filter);
   --color-primary-filter: invert(73%) sepia(17%) saturate(360%) hue-rotate(177deg) brightness(87%) contrast(85%);
+
+  /* Pin icon SVGs as CSS variables */
+  --pin-icon-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cpath d='M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z' /%3E%3C/svg%3E");
+  --pin-icon-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='%23333333'%3E%3Cpath d='M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z' /%3E%3C/svg%3E");
 }
 
 /* Light mode class */
@@ -216,8 +220,8 @@ img {
 
 /* Sidebar Toggle Button */
 .toggle-sidebar-button {
-  height: 2.6rem;
-  width: 2.6rem;
+  width: auto;
+  height: 2.3rem;
   background-color: var(--color-background);
   border: 0.1rem solid var(--color-border);
   border-radius: var(--spacing-xs);
@@ -225,9 +229,8 @@ img {
   opacity: 0.8;
   cursor: pointer;
   left: var(--spacing-md);
-  padding: 0.47rem 0.56rem;
   position: absolute;
-  top: var(--spacing-md);
+  top: var(--spacing-sm);
   z-index: 999;
   -webkit-transition: all var(--transition-speed) ease-in-out;
   transition: all var(--transition-speed) ease-in-out;
@@ -284,12 +287,13 @@ img {
   padding-bottom: 6px;
 }
 
-/* Subtle background on hover for the entire row */
-.chat-list-button:hover {
+/* Subtle background on hover for the entire chat item */
+.chat-item:hover {
   background-color: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
 }
 
-.light-mode .chat-list-button:hover {
+.light-mode .chat-item:hover {
   background-color: rgba(0, 0, 0, 0.02);
 }
 
@@ -307,16 +311,6 @@ img {
   /* Make space for buttons */
   font-size: var(--font-size-small);
   /* Match config button font size */
-}
-
-/* Add a nice hover effect to just the chat name */
-.chat-name:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  text-decoration: none;
-}
-
-.light-mode .chat-name:hover {
-  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .chats-list-container {
@@ -429,14 +423,30 @@ img {
   margin-left: 0;
 }
 
+/* Header Bar */
+#header-bar {
+    background-color: var(--color-panel);
+    padding: var(--spacing-sm);
+    position: sticky;
+    top: 0;
+    z-index: 998;
+}
+
+.light-mode #header-bar {
+  background-color: #f0f0f0;
+}
+
+.dark-mode #header-bar {
+  background-color: #1a1a1a;
+}
+
 #time-date-container {
   z-index: 1000;
-  position: fixed;
   right: var(--spacing-md);
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  margin-top: var(--spacing-md);
+  justify-content: flex-end;
 }
 
 #time-date {
@@ -450,25 +460,6 @@ img {
   font-size: var(--font-size-small);
   opacity: 0.6;
 }
-
-/* Typography */
-/* h2,
-h3 {
-  color: var(--color-primary);
-} */
-
-/* h2 {
-  margin-bottom: var(--spacing-sm);
-  margin-top: var(--spacing-lg);
-}
-
-h3 {
-  margin-bottom: var(--spacing-sm);
-}
-
-h4 {
-  margin: auto 0;
-} */
 
 #a0version {
   color: var(--color-text);
@@ -486,7 +477,7 @@ h4 {
   justify-content: space-between;
   position: fixed;
   margin-left: 4.6rem;
-  margin-top: var(--spacing-md);
+  margin-top: var(--spacing-sm);
   z-index: 999;
   -webkit-transition: margin-left var(--transition-speed) ease-in-out;
   transition: margin-left var(--transition-speed) ease-in-out;
@@ -500,7 +491,7 @@ h4 {
 #logo-container img {
   border-radius: var(--spacing-xs);
   width: auto;
-  height: 2.6rem;
+  height: 2.3rem;
   -webkit-transition: filter 0.3s ease;
   transition: filter 0.3s ease;
 }
@@ -841,7 +832,7 @@ h4 {
   display: -webkit-flex;
   display: flex;
   justify-content: space-between;
-  padding: 0.35rem 0;
+  padding: 0.2rem 0;
 }
 
 .config-list>*:first-child {
@@ -1939,15 +1930,6 @@ a:active {
   margin-left: 5px;
 }
 
-.task-name:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  text-decoration: none;
-}
-
-.light-mode .task-name:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
 /* Dark mode overrides */
 .light-mode .tab.active {
   color: var(--highlight-pink);
@@ -2135,6 +2117,48 @@ a:active {
   justify-content: space-between;
 }
 
+/* Pinned chat styling - applies to entire chat item */
+.chat-item.pinned {
+  /* background-color: rgba(255, 255, 255, 0.05); */
+  border-left: 3px solid var(--color-primary);
+  border-radius: 4px;
+  position: relative;
+}
+
+.light-mode .chat-item.pinned {
+  /* background-color: rgba(0, 0, 0, 0.03); */
+  border-left: 3px solid var(--color-primary);
+}
+
+/* Pinned chat hover effect */
+.chat-item.pinned:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.light-mode .chat-item.pinned:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Pin icon indicator */
+.chat-item.pinned .chat-name::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  background-image: var(--pin-icon-dark);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.8;
+  vertical-align: middle;
+}
+
+/* Light mode pin icon */
+.light-mode .chat-item.pinned .chat-name::before {
+  background-image: var(--pin-icon-light);
+}
+
 /* Chat menu container */
 .chat-menu-container {
   position: relative;
@@ -2164,11 +2188,28 @@ a:active {
 
 .chat-menu-button:hover {
   opacity: 1 !important;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 16px 8px; /* Match the total height of chat list button */
+  margin: -8px 0; /* Negative margin to center it vertically */
+  border-radius: 4px;
 }
 
 .light-mode .chat-menu-button:hover {
-  background-color: rgba(0, 0, 0, 0.1);
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 16px 8px;
+  margin: -8px 0;
+  border-radius: 4px;
+}
+
+/* Special hover style for task list items with more content */
+#tasks-section .chat-menu-button:hover {
+  padding: 24px 8px; /* Larger padding for task items with vertical layout */
+  margin: -16px 0; /* Adjust negative margin accordingly */
+}
+
+#tasks-section.light-mode .chat-menu-button:hover {
+  padding: 24px 8px;
+  margin: -16px 0;
 }
 
 /* Dropdown menu */

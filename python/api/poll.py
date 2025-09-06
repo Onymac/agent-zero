@@ -96,8 +96,21 @@ class Poll(ApiHandler):
             # Mark as processed
             processed_contexts.add(ctx.id)
 
-        # Sort tasks and chats by their creation date, descending
-        ctxs.sort(key=lambda x: x["created_at"], reverse=True)
+        # Sort chats: pinned first, then by creation date (newest first)
+        def sort_chats_key(chat):
+            # First sort by pinned status (pinned = True comes first)
+            pinned = chat.get("pinned", False)
+            # Then sort by creation date
+            created_at = chat.get("created_at", "")
+            
+            # Return tuple: (pinned_priority, created_at)
+            # pinned_priority: 1 for pinned (higher priority), 0 for not pinned
+            # This way when reverse=True, pinned items come first
+            return (1 if pinned else 0, created_at)
+        
+        ctxs.sort(key=sort_chats_key, reverse=True)
+        
+        # Sort tasks by their creation date, descending
         tasks.sort(key=lambda x: x["created_at"], reverse=True)
 
         # data from this server
