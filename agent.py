@@ -53,6 +53,7 @@ class AgentContext:
         created_at: datetime | None = None,
         type: AgentContextType = AgentContextType.USER,
         last_message: datetime | None = None,
+        pinned: bool = False,
     ):
         # build context
         self.id = id or AgentContext.generate_id()
@@ -65,6 +66,7 @@ class AgentContext:
         self.task: DeferredTask | None = None
         self.created_at = created_at or datetime.now(timezone.utc)
         self.type = type
+        self.pinned = pinned
         AgentContext._counter += 1
         self.no = AgentContext._counter
         # set to start of unix epoch
@@ -132,6 +134,7 @@ class AgentContext:
                 else Localization.get().serialize_datetime(datetime.fromtimestamp(0))
             ),
             "type": self.type.value,
+            "pinned": self.pinned,
         }
 
     @staticmethod

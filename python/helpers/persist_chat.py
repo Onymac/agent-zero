@@ -14,6 +14,26 @@ LOG_SIZE = 1000
 CHAT_FILE_NAME = "chat.json"
 
 
+def _parse_datetime(value):
+    """
+    Parse datetime from either ISO 8601 string (YYYY-MM-DDTHH:MM:SS[.ffffff][+HH:MM]) or timestamp.
+    Provides backward compatibility for older chat files.
+    If the string is not a valid ISO format, returns epoch (1970-01-01).
+    """
+    if isinstance(value, str):
+        # If it's a string, assume it's ISO format
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return datetime.fromtimestamp(0)
+    elif isinstance(value, (int, float)):
+        # If it's a number, assume it's a timestamp
+        return datetime.fromtimestamp(value)
+    else:
+        # Fallback to epoch
+        return datetime.fromtimestamp(0)
+
+
 def get_chat_folder_path(ctxid: str):
     """
     Get the folder path for any context (chat or task).
@@ -137,6 +157,7 @@ def _serialize_context(context: AgentContext):
             if context.last_message
             else datetime.fromtimestamp(0).isoformat()
         ),
+        "pinned": getattr(context, 'pinned', False),
         "agents": agents,
         "streaming_agent": (
             context.streaming_agent.number if context.streaming_agent else 0
@@ -177,17 +198,18 @@ def _deserialize_context(data):
         id=data.get("id", None),  # get new id
         name=data.get("name", None),
         created_at=(
-            datetime.fromisoformat(
+            _parse_datetime(
                 # older chats may not have created_at - backcompat
                 data.get("created_at", datetime.fromtimestamp(0).isoformat())
             )
         ),
         type=AgentContextType(data.get("type", AgentContextType.USER.value)),
         last_message=(
-            datetime.fromisoformat(
+            _parse_datetime(
                 data.get("last_message", datetime.fromtimestamp(0).isoformat())
             )
         ),
+        pinned=data.get("pinned", False),
         log=log,
         paused=False,
         # agent0=agent0,
