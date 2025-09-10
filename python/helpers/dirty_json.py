@@ -1,4 +1,5 @@
 import json
+import re
 
 def try_parse(json_string: str):
     try:
@@ -296,14 +297,30 @@ class DirtyJson:
         number_str = ""
         while self.current_char is not None and (
             self.current_char.isdigit()
-            or self.current_char in ["-", "+", ".", "e", "E"]
+            or self.current_char in ["-", "+", ".", "e", "E", ":", "T", "Z", "/"]
         ):
             number_str += self.current_char
             self._advance()
+        # For common date/time/datetime/timezone formats, return as string directly
+        date_patterns = [
+            r"^\d{4}-\d{2}-\d{2}$",                # 2025-09-10
+            r"^\d{4}/\d{2}/\d{2}$",                # 2025/09/10
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", # 2025-09-10T12:34:56Z
+            r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",   # 2025-09-10 12:34:56
+            r"^\d{2}:\d{2}:\d{2}$",                # 12:34:56
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$", # ISO8601
+        ]
+        for pat in date_patterns:
+            if re.match(pat, number_str):
+                return number_str
         try:
             return int(number_str)
         except ValueError:
-            return float(number_str)
+            try:
+                return float(number_str)
+            except ValueError:
+                # Fallback: if cannot parse as number, return original string
+                return number_str
 
     def _parse_unquoted_string(self):
         result = ""
