@@ -5,7 +5,6 @@ echo "====================SEARXNG1 START===================="
 
 # Install necessary packages
 apt-get install -y \
-    python3.12-dev python3.12-venv \
     git build-essential libxslt-dev zlib1g-dev libffi-dev libssl-dev
 #    python3.12-babel uwsgi uwsgi-plugin-python3
 
@@ -27,4 +26,3 @@ echo "====================SEARXNG1 END===================="
 
 # Start a new shell as the searxng user and run the installation script
 su - searxng -c "bash /ins/install_searxng2.sh"
-
